@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lector QR - Academia TKD</title>
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <style>
+    :root{font-family:Arial,sans-serif;color:#172033;background:#f3f5f8}
+    body{margin:0;padding:16px} main{max-width:560px;margin:0 auto;background:#fff;border:1px solid #e1e6ee;border-radius:14px;padding:18px;box-shadow:0 2px 7px #1020300b}
+    h1{font-size:22px;margin:0 0 8px;color:#15243a}.muted{color:#64748b;font-size:14px;line-height:1.45}
+    button{font-size:16px;border-radius:9px;padding:12px 15px;border:1px solid #cbd5e1;background:#fff;color:#172033;cursor:pointer;font-weight:600}
+    .primary{background:#1769aa;color:#fff;border-color:#1769aa}.row{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}
+    #reader{width:100%;max-width:480px;margin:12px auto}.status{padding:12px;border-radius:9px;margin:12px 0;white-space:pre-wrap;line-height:1.4}
+    .ok{background:#dcfce7;color:#166534}.warn{background:#fef3c7;color:#92400e}.err{background:#fee2e2;color:#991b1b}
+  </style>
+</head>
+<body>
+<main>
+  <h1>Lector QR — Academia TKD</h1>
+  <p class="muted">Esta ventana solo lee el QR y envía el token a la aplicación de asistencia que la abrió. Los datos del alumno se consultan en Google Sheets desde la aplicación principal.</p>
+  <div class="row">
+    <button id="startBtn" class="primary" onclick="startScanner()">Iniciar cámara</button>
+    <button id="nextBtn" onclick="startScanner()" hidden>Escanear siguiente</button>
+    <button onclick="closeScanner()">Cerrar lector</button>
+  </div>
+  <div id="reader"></div>
+  <div id="status" class="status warn">Pulsa “Iniciar cámara” y permite el acceso cuando el navegador lo solicite.</div>
+</main>
+<script>
+let scanner=null, running=false, processing=false;
+const startBtn=document.getElementById('startBtn');
+const nextBtn=document.getElementById('nextBtn');
+function setStatus(text, kind){
+  const el=document.getElementById('status');
+  el.textContent=text;
+  el.className='status '+(kind||'warn');
+}
+async function stopCamera(clear=true){
+  if(scanner && running){try{await scanner.stop();}catch(e){}}
+  running=false;
+  if(scanner && clear){try{await scanner.clear();}catch(e){}}
+  scanner=null;
+}
+async function startScanner(){
+  if(running || processing) return;
+  if(!window.Html5Qrcode){setStatus('No se pudo cargar la biblioteca del lector QR. Revisa la conexión a internet y recarga.','err');return;}
+  startBtn.hidden=true; nextBtn.hidden=true;
+  try{
+    scanner=new Html5Qrcode('reader');
+    await scanner.start({facingMode:'environment'},{fps:10,qrbox:{width:240,height:240}},onScanSuccess,()=>{});
+    running=true;
+    setStatus('Cámara activa. Coloca el QR dentro del cuadro.','ok');
+  }catch(e){
+    await stopCamera();
+    startBtn.hidden=false;
+    setStatus('No se pudo iniciar la cámara. Comprueba los permisos de este sitio y que esté abierto por HTTPS.\n'+e,'err');
+  }
+}
+async function onScanSuccess(decodedText){
+  if(processing) return;
+  processing=true;
+  const token=String(decodedText||'').trim();
+  if(!token){processing=false;return;}
+  await stopCamera();
+  try{
+    if(!window.opener || window.opener.closed){
+      setStatus('No encuentro la ventana de asistencia que abrió este lector. Cierra esta ventana y vuelve a abrirlo desde la aplicación.','err');
+      startBtn.hidden=false;processing=false;return;
+    }
+    window.opener.postMessage({type:'TKD_QR_TOKEN',token:token},'*');
+    setStatus('QR leído y enviado a la aplicación principal. Revisa allí el resultado y luego pulsa “Escanear siguiente”.','ok');
+    nextBtn.hidden=false;
+  }catch(e){
+    setStatus('Se leyó el QR, pero no se pudo enviar a la aplicación principal. Cierra el lector y ábrelo de nuevo desde la aplicación.\n'+e,'err');
+    startBtn.hidden=false;
+  }
+  processing=false;
+}
+function closeScanner(){
+  stopCamera().finally(()=>window.close());
+}
+window.addEventListener('beforeunload',()=>{if(scanner&&running){try{scanner.stop();}catch(e){}}});
+</script>
+</body>
+</html>
